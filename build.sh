@@ -12,7 +12,7 @@
 #CMSIS_DIR= #Directory containing CMSIS
 #NRFJPROG_DIR= #Directory containing nrfjprog
 
-TARGET=ble_bm
+TARGET=blinky
 
 build() {
 	find_CC
@@ -56,25 +56,25 @@ flash() {
 find_CC() {
 	find_inner() {
 		set +e
-		$2$1 --version 2> /dev/null > /dev/null
+		$1$2 --version 2> /dev/null > /dev/null
 		result=$?
 		set -e
 		if [ $result == 0 ]; then
-			echo "Found compiler at: $2$1"
-			echo "Version: $($2$1 --version | head -n 1)"			
-			CC=$2$1
-			OBJCOPY=${2}objcopy
-			OBJDUMP=${2}objdump
+			echo "Found compiler at: $1$2"
+			echo "Version: $($1$2 --version | head -n 1)"			
+			CC=$1$2
+			OBJCOPY=${1}objcopy
+			OBJDUMP=${1}objdump
 			return 1
 		else
 			return 0
 		fi
 	}
 	trap 'return 0' ERR
-	find_inner gcc $GCC_ARM_BIN_DIR/arm-none-eabi-
-	find_inner gcc $GCC_ARM_BIN_DIR/bin/arm-none-eabi-
-	find_inner gcc arm-none-eabi-
-	find_inner gcc $ZEPHYR_SDK_INSTALL_DIR/arm-zephyr-eabi/bin/arm-zephyr-eabi-
+	find_inner $GCC_ARM_BIN_DIR/arm-none-eabi- gcc
+	find_inner $GCC_ARM_BIN_DIR/bin/arm-none-eabi- gcc
+	find_inner arm-none-eabi- gcc
+	find_inner $ZEPHYR_SDK_INSTALL_DIR/arm-zephyr-eabi/bin/arm-zephyr-eabi- gcc
 	echo "ERROR: Cannot find compiler (arm-none-eabi-gcc)!"
 	echo "ERROR: Add its bin directory to your PATH or GCC_ARM_BIN_DIR variable."
 	exit 1
@@ -107,7 +107,6 @@ find_CMSIS() {
 	find_inner $WITH_VER/CMSIS/Core/Include
 	WITH_VER=(./CMSIS_*)
 	find_inner $WITH_VER/CMSIS/Core/Include
-	find_inner ./CMSIS/CMSIS/Core/Include
 	find_inner $ZEPHYR_BASE/ext/hal/CMSIS/Core/Include
 	echo "ERROR: Cannot find CMSIS directory!"
 	echo "ERROR: Place it in $(realpath .)/CMSIS or provide path in CMSIS_DIR variable."
