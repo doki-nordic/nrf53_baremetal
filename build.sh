@@ -19,12 +19,12 @@ build() {
 	find_NRFX
 	find_CMSIS
 
-	SOURCE_FILES="./src/main.c
+	SOURCE_FILES="./src/main.c ./src/cbkprox.c
 		$NRFX/mdk/gcc_startup_nrf5340_application.S
 		$NRFX/mdk/system_nrf5340_application.c"
 	INCLUDE="-I$NRFX/mdk -I$CMSIS"
 	LIBS="-L$NRFX/mdk"
-	CFLAGS="-O0 -g3 -fdata-sections -ffunction-sections -Wl,--gc-sections
+	CFLAGS="-Os -g3 -fdata-sections -ffunction-sections -Wl,--gc-sections
 		-Wall -fno-strict-aliasing -fshort-enums
 		-D__HEAP_SIZE=65536 -D__STACK_SIZE=65536
 		-mthumb -mabi=aapcs -Tnrf5340_xxaa_application.ld
