@@ -15,18 +15,17 @@ typedef int (*call_t)(int);
 
 int callback_handler(int a)
 {
-	uint32_t index;
-	uint64_t state = cbkprox_start_handler(&index);
+	uint64_t state = cbkprox_start_handler();
 	volatile int x = 0;
 	x = x;
-	cbkprox_end_handler(state, index);
+	cbkprox_end_handler(state);
 	return 123;
 }
 
 void test()
 {
 	call_t call0 = (call_t)cbkprox_alloc(0, (void *)callback_handler);
-	call_t call1 = (call_t)cbkprox_alloc(0, (void *)callback_handler);
+	call_t call1 = (call_t)cbkprox_alloc(5, (void *)callback_handler);
 	int r;
 	volatile int x;
 	r = call0(234);
@@ -37,6 +36,15 @@ void test()
 	x = x;
 }
 
+volatile int xxx;
+
+__attribute__ ((__used__))
+__attribute__ ((__noinline__))
+void *test2()
+{
+	xxx = sin(12);
+	return __builtin_return_address(0);
+}
 
 int main()
 {
@@ -47,6 +55,7 @@ int main()
 	NRF_P0_S->PIN_CNF[31] = 1;
 
 	test();
+	//test2();
 
 	while(1)
 	{

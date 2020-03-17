@@ -11,7 +11,7 @@
 #define TABLE_ENTRY1 \
 	"push {r4, r5, lr}\n" \
 	"nop\n" \
-	"bl callback_jump_table_end\n"
+	"bl .L%=callback_jump_table_end\n"
 
 #define TABLE_ENTRY2 TABLE_ENTRY1 TABLE_ENTRY1
 #define TABLE_ENTRY4 TABLE_ENTRY2 TABLE_ENTRY2
@@ -29,7 +29,7 @@
 
 struct callback_context
 {
-	uint32_t state[4];
+	uint32_t state[3]; /* 0 - previous PRIMASK value, 1 - return address, 2 - index of the callback slot */
 	void* callbacks[CONFIG_CBKPROX_SLOTS];
 };
 
@@ -81,7 +81,7 @@ void callback_jump_table_start(void)
 #if CONFIG_CBKPROX_SLOTS & 8192
 		TABLE_ENTRY8192
 #endif
-		"callback_jump_table_end:\n"
+		".L%=callback_jump_table_end:\n"
 		"ldr   r5, .L%=callback_jump_table_start_addr\n"
 		"sub   lr, r5\n"
 		"asrs  lr, lr, #1\n"
@@ -89,57 +89,54 @@ void callback_jump_table_start(void)
 		"mrs   r4, PRIMASK\n"
 		"cpsid i\n"
 		"str   r4, [r5]\n"
-		"str   lr, [r5, #4]\n"
-		"ldr   r4, [sp, #4]\n"
-		"str   r4, [r5, #8]\n"
+		"str   lr, [r5, #8]\n"
 		"ldr   r4, [sp, #8]\n"
-		"str   r4, [r5, #12]\n"
-		"ldr   r5, [r5, lr]\n"
-		"add   sp, #8\n"
-		"pop   {r4}\n"
-		"blx   r5\n"
-		"sub   sp, #8\n"
-		"ldr   r5, .L%=callback_context_addr\n"
-		"ldr   r3, [r5, #8]\n"
-		"str   r3, [sp, #4]\n"
-		"ldr   r3, [r5, #12]\n"
-		"str   r3, [sp, #8]\n"
-		"ldr   r3, [r5]\n"
+		"str   r4, [r5, #4]\n"
+		"ldr   lr, [r5, lr]\n"
+		"pop   {r4, r5}\n"
+		"add   sp, #4\n"
+		"push  {lr}\n"
+		"ldr   lr, .L%=handler_return_addr\n"
+		"pop   {pc}\n"
+		".L%=handler_return:"
+		"sub   sp, #4\n"
+		"ldr   r2, .L%=callback_context_addr\n"
+		"ldr   r3, [r2, #4]\n"
+		"str   r3, [sp]\n"
+		"ldr   r3, [r2]\n"
  		"cbnz  r3, .L%=next_instr\n"
  		"cpsie i\n"
 		".L%=next_instr:\n"
-		"pop   {r5, pc}\n"
-		".align 1\n"
+		"pop   {pc}\n"
+		".align 2\n"
+		".L%=handler_return_addr:\n"
+		".word .L%=handler_return + 1\n"
 		".L%=callback_jump_table_start_addr:\n"
-		".word callback_jump_table_start - 24\n"
+		".word callback_jump_table_start - 16\n"
 		".L%=callback_context_addr:\n"
 		".word callback_context\n":::
 		);
 }
 
 
-uint64_t cbkprox_start_handler(uint32_t *index)
+uint64_t cbkprox_start_handler()
 {
-	uint32_t index_value;
 	uint64_t result;
-	result = (uint64_t)callback_context.state[2] | ((uint64_t)callback_context.state[3] << 32);
-	index_value = callback_context.state[1];
+	result = (uint64_t)((callback_context.state[2] - 12) / 4) | ((uint64_t)callback_context.state[1] << 32);
 	if (!callback_context.state[0]) {
 		__asm volatile("cpsie i\n":::"memory");
 	} else {
-		index_value |= 0x80000000;
+		result |= 0x80000000LL;
 	}
-	*index = index_value;
 	return result;
 }
 
-void cbkprox_end_handler(uint64_t state, uint32_t index)
+void cbkprox_end_handler(uint64_t state)
 {
-	index &= 0x80000000;
-	__asm volatile("cpsid i\n"::"r"(index):"memory");
-	callback_context.state[0] = index;
-	callback_context.state[2] = (uint32_t)state;
-	callback_context.state[3] = (uint32_t)(state >> 32);
+	uint64_t key = state & 0x80000000LL;
+	__asm volatile("cpsid i\n"::"r"(key):"memory");
+	callback_context.state[0] = key;
+	callback_context.state[1] = (uint32_t)(state >> 32);
 }
 
 void* cbkprox_alloc(uint32_t index, void *handler)
@@ -163,3 +160,29 @@ void* cbkprox_alloc(uint32_t index, void *handler)
 
 	return (void*)addr;
 }
+
+/*
+
+solution for x86 i x86_64
+
+each entry:
+	CALL callback_jump_table_end
+
+push minimum what needed
+automic inc
+if non-zero before:
+	push all what cannon change
+	wait for access (zero value) with sleep/yeyld
+	pop what pushed before
+pop index and save to state
+pop return and save to state
+push new return
+load callback pointer
+push to stack
+"ret" to jump to handler
+read return from state
+push return to stack
+"ret" to return to caller
+
+
+*/
