@@ -4,8 +4,14 @@
 
 #include "cbkprox.h"
 
-#if CONFIG_CBKPROX_SLOTS > 16383
-#error "Too many cbkprox slots"
+#if CONFIG_CBKPROX_OUT_SLOTS > 0
+
+#if CONFIG_CBKPROX_OUT_SLOTS > 16383
+#error "Too many callback proxy output slots"
+#endif
+
+#if __ARM_ARCH != 8 || __ARM_ARCH_ISA_THUMB != 2 || !defined(__GNUC__)
+#error "Callback proxy output implemented only for Cortex-M33 and GCC. Set CONFIG_CBKPROX_OUT_SLOTS to 0 to disable them."
 #endif
 
 #define TABLE_ENTRY1 \
@@ -27,65 +33,65 @@
 #define TABLE_ENTRY4096 TABLE_ENTRY2048 TABLE_ENTRY2048
 #define TABLE_ENTRY8192 TABLE_ENTRY4096 TABLE_ENTRY4096
 
-struct callback_context
-{
-	uint32_t state[3]; /* 0 - previous PRIMASK value, 1 - return address, 2 - index of the callback slot */
-	void* callbacks[CONFIG_CBKPROX_SLOTS];
-};
 
-static struct callback_context callback_context;
+struct
+{
+	uint32_t state[3];
+	void* callbacks[CONFIG_CBKPROX_OUT_SLOTS];
+} out_context;
+
 
 __attribute__((naked))
-void callback_jump_table_start(void)
+static void callback_jump_table_start(void)
 {
 	__asm volatile (
-#if CONFIG_CBKPROX_SLOTS & 1
+#if CONFIG_CBKPROX_OUT_SLOTS & 1
 		TABLE_ENTRY1
 #endif
-#if CONFIG_CBKPROX_SLOTS & 2
+#if CONFIG_CBKPROX_OUT_SLOTS & 2
 		TABLE_ENTRY2
 #endif
-#if CONFIG_CBKPROX_SLOTS & 4
+#if CONFIG_CBKPROX_OUT_SLOTS & 4
 		TABLE_ENTRY4
 #endif
-#if CONFIG_CBKPROX_SLOTS & 8
+#if CONFIG_CBKPROX_OUT_SLOTS & 8
 		TABLE_ENTRY8
 #endif
-#if CONFIG_CBKPROX_SLOTS & 16
+#if CONFIG_CBKPROX_OUT_SLOTS & 16
 		TABLE_ENTRY16
 #endif
-#if CONFIG_CBKPROX_SLOTS & 32
+#if CONFIG_CBKPROX_OUT_SLOTS & 32
 		TABLE_ENTRY32
 #endif
-#if CONFIG_CBKPROX_SLOTS & 64
+#if CONFIG_CBKPROX_OUT_SLOTS & 64
 		TABLE_ENTRY64
 #endif
-#if CONFIG_CBKPROX_SLOTS & 128
+#if CONFIG_CBKPROX_OUT_SLOTS & 128
 		TABLE_ENTRY128
 #endif
-#if CONFIG_CBKPROX_SLOTS & 256
+#if CONFIG_CBKPROX_OUT_SLOTS & 256
 		TABLE_ENTRY256
 #endif
-#if CONFIG_CBKPROX_SLOTS & 512
+#if CONFIG_CBKPROX_OUT_SLOTS & 512
 		TABLE_ENTRY512
 #endif
-#if CONFIG_CBKPROX_SLOTS & 1024
+#if CONFIG_CBKPROX_OUT_SLOTS & 1024
 		TABLE_ENTRY1024
 #endif
-#if CONFIG_CBKPROX_SLOTS & 2048
+#if CONFIG_CBKPROX_OUT_SLOTS & 2048
 		TABLE_ENTRY2048
 #endif
-#if CONFIG_CBKPROX_SLOTS & 4096
+#if CONFIG_CBKPROX_OUT_SLOTS & 4096
 		TABLE_ENTRY4096
 #endif
-#if CONFIG_CBKPROX_SLOTS & 8192
+#if CONFIG_CBKPROX_OUT_SLOTS & 8192
 		TABLE_ENTRY8192
 #endif
 		".L%=callback_jump_table_end:\n"
 		"ldr   r5, .L%=callback_jump_table_start_addr\n"
 		"sub   lr, r5\n"
 		"asrs  lr, lr, #1\n"
-		"ldr   r5, .L%=callback_context_addr\n"
+		"ldr   r5, .L%=out_context_addr\n"
 		"mrs   r4, PRIMASK\n"
 		"cpsid i\n"
 		"str   r4, [r5]\n"
@@ -100,7 +106,7 @@ void callback_jump_table_start(void)
 		"pop   {pc}\n"
 		".L%=handler_return:"
 		"sub   sp, #4\n"
-		"ldr   r2, .L%=callback_context_addr\n"
+		"ldr   r2, .L%=out_context_addr\n"
 		"ldr   r3, [r2, #4]\n"
 		"str   r3, [sp]\n"
 		"ldr   r3, [r2]\n"
@@ -113,17 +119,17 @@ void callback_jump_table_start(void)
 		".word .L%=handler_return + 1\n"
 		".L%=callback_jump_table_start_addr:\n"
 		".word callback_jump_table_start - 16\n"
-		".L%=callback_context_addr:\n"
-		".word callback_context\n":::
+		".L%=out_context_addr:\n"
+		".word out_context\n":::
 		);
 }
 
 
-uint64_t cbkprox_start_handler()
+uint64_t cbkprox_out_start_handler()
 {
 	uint64_t result;
-	result = (uint64_t)((callback_context.state[2] - 12) / 4) | ((uint64_t)callback_context.state[1] << 32);
-	if (!callback_context.state[0]) {
+	result = (uint64_t)((out_context.state[2] - 12) / 4) | ((uint64_t)out_context.state[1] << 32);
+	if (!out_context.state[0]) {
 		__asm volatile("cpsie i\n":::"memory");
 	} else {
 		result |= 0x80000000LL;
@@ -131,26 +137,26 @@ uint64_t cbkprox_start_handler()
 	return result;
 }
 
-void cbkprox_end_handler(uint64_t state)
+void cbkprox_out_end_handler(uint64_t state)
 {
 	uint64_t key = state & 0x80000000LL;
 	__asm volatile("cpsid i\n"::"r"(key):"memory");
-	callback_context.state[0] = key;
-	callback_context.state[1] = (uint32_t)(state >> 32);
+	out_context.state[0] = key;
+	out_context.state[1] = (uint32_t)(state >> 32);
 }
 
-void* cbkprox_alloc(uint32_t index, void *handler)
+void* cbkprox_out_get(int index, void *handler)
 {
 	uint32_t addr;
 
-	if (index >= CONFIG_CBKPROX_SLOTS) {
+	if (index >= CONFIG_CBKPROX_OUT_SLOTS || index < 0) {
 		return NULL;
 	}
-	else if (callback_context.callbacks[index] == NULL)
+	else if (out_context.callbacks[index] == NULL)
 	{
-		callback_context.callbacks[index] = handler;
+		out_context.callbacks[index] = handler;
 	}
-	else if (callback_context.callbacks[index] != handler)
+	else if (out_context.callbacks[index] != handler)
 	{
 		return NULL;
 	}
@@ -161,28 +167,110 @@ void* cbkprox_alloc(uint32_t index, void *handler)
 	return (void*)addr;
 }
 
-/*
 
-solution for x86 i x86_64
-
-each entry:
-	CALL callback_jump_table_end
-
-push minimum what needed
-automic inc
-if non-zero before:
-	push all what cannon change
-	wait for access (zero value) with sleep/yeyld
-	pop what pushed before
-pop index and save to state
-pop return and save to state
-push new return
-load callback pointer
-push to stack
-"ret" to jump to handler
-read return from state
-push return to stack
-"ret" to return to caller
+#else
 
 
-*/
+uint64_t cbkprox_out_start_handler()
+{
+	return 0;
+}
+
+void cbkprox_out_end_handler(uint64_t state)
+{
+}
+
+void* cbkprox_out_get(int index, void *handler)
+{
+	return NULL;
+}
+
+
+#endif /* CONFIG_CBKPROX_OUT_SLOTS > 0 */
+
+
+#if CONFIG_CBKPROX_IN_SLOTS > 0
+
+
+static struct
+{
+	intptr_t callback;
+	void *handler;
+	uint16_t gt;
+	uint16_t lt;
+} in_slots[CONFIG_CBKPROX_IN_SLOTS];
+
+static uint32_t next_free_in_slot = 0;
+
+
+int cbkprox_in_set(void *handler, void *callback)
+{
+	int index = 0;
+	uint16_t *attach_to = NULL;
+	uintptr_t callback_int = (uintptr_t)callback;
+
+#ifdef CONFIG_CBKPROX_IN_LOCK
+	CONFIG_CBKPROX_IN_LOCK;
+#endif
+
+	if (next_free_in_slot == 0) {
+		attach_to = &in_slots[0].lt;
+	} else {
+		do {
+			if (callback_int == in_slots[index].callback) {
+				attach_to = NULL;
+				break;
+			} else if (callback_int < in_slots[index].callback) {
+				attach_to = &in_slots[index].lt;
+			} else {
+				attach_to = &in_slots[index].gt;
+			}
+			index = *attach_to;
+		} while (index > 0);
+	}
+
+	if (attach_to != NULL) {
+		if (next_free_in_slot >= CONFIG_CBKPROX_IN_SLOTS) {
+			index = -1;
+		} else {
+			index = next_free_in_slot;
+			next_free_in_slot++;
+			*attach_to = index;
+			in_slots[index].callback = callback_int;
+			in_slots[index].handler = handler;
+			in_slots[index].gt = 0;
+			in_slots[index].lt = 0;
+		}
+	} else if (in_slots[index].handler != handler) {
+		index = -1;
+	}
+
+#ifdef CONFIG_CBKPROX_IN_UNLOCK
+	CONFIG_CBKPROX_IN_UNLOCK;
+#endif
+
+	return index;
+}
+
+void *cbkprox_in_get(int index, void **callback)
+{
+	if (index >= next_free_in_slot || index < 0) {
+		return NULL;
+	}
+	*callback = (void*)in_slots[index].callback;
+	return in_slots[index].handler;
+}
+
+#else
+
+int cbkprox_in_set(void *handler, void *callback)
+{
+	return -1;
+}
+
+void *cbkprox_in_get(int index, void **callback)
+{
+	return NULL;
+}
+
+#endif /* CONFIG_CBKPROX_IN_SLOTS > 0 */
