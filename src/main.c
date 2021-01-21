@@ -49,11 +49,8 @@ void sample_function(uint32_t some_parameter, example_callback_t callback)
 
 /* ====================== net core example */
 
-void sample_function_callback_handler(uint32_t param1)
+void sample_function_callback_handler(uint32_t callback_slot, int rsv1, int rsv2, int rsv3, uint32_t param1)
 {
-	// start handler and get callback slot index
-	uint64_t state = cbkprox_out_start_handler();
-	uint32_t callback_slot = state & 0xFFFF;
 	// encode parameters
 	uint32_t buffer[3];
 	buffer[0] = ID_CALL_CALLBACK;
@@ -61,8 +58,6 @@ void sample_function_callback_handler(uint32_t param1)
 	buffer[2] = param1;
 	// send command to app core
 	send_command(buffer);
-	// exit handler
-	cbkprox_out_end_handler(state);
 }
 
 void sample_function_on_net_core(uint32_t *buffer)
@@ -138,6 +133,74 @@ void test3()
 	ser_sample_function(4, test3_callback2);
 }
 
+const volatile char strtt[] __attribute__((section(".datatext"))) = "qwertyuofksdjfhsdfsdf";
+
+__attribute__((noinline))
+void __attribute__((section(".datatext.testRAM"))) testRAM()
+{
+	NRF_P0_S->PIN_CNF[28] = strtt[3];
+}
+
+static inline void* _LONG_JUMP_helper(void* p) {
+	__asm__ volatile ("":"+r"(p));
+	return p;
+}
+
+#define LONG_JUMP(func) ((typeof(&(func)))_LONG_JUMP_helper(&(func)))
+
+
+void func3(int dummy, ...);
+
+#include <stdarg.h>
+
+void func4(int dummy, ...)
+{
+	va_list vl;
+	va_start(vl, dummy);
+	NRF_P0_S->PIN_CNF[28] = va_arg(vl, int32_t);
+	va_end(vl);
+}
+
+void funcccccc(void)
+{
+	func3(0, 1, 2, 3, 4, 5, 6);
+}
+
+typedef struct S_
+{
+	uint32_t big[5];
+} S;
+
+
+#define paramsA int r0, int r1, int r2, int r3
+#define paramsB S p0, int p1
+
+#define argA 0, 0, 0, 0
+#define argB s, 0x11
+
+void test4_handler(paramsA, paramsB)
+{
+}
+
+typedef void (*test4_t)(paramsB);
+
+void test4_test1(paramsB)
+{
+}
+
+void test4_test2(paramsA, paramsB)
+{
+}
+
+void test5i(int a, int b, int c, int d);
+
+void test5(int a, int b, int c, int d) {
+	test5i(a, b, c, d);
+	a += 10;
+	b ++;
+	//x = x + c + d;
+	test5i(a, b, c, d);
+}
 
 int main()
 {
@@ -146,9 +209,25 @@ int main()
 	NRF_P0_S->PIN_CNF[29] = 1;
 	NRF_P0_S->PIN_CNF[30] = 1;
 	NRF_P0_S->PIN_CNF[31] = 1;
+	NRF_P0_S->PIN_CNF[31] = (uint32_t)&test5;
+/*
+	test4_t f = (test4_t)cbkprox_out_get(0, test4_handler);
+
+	S s;
+	s.big[0] = 0x30;
+	s.big[1] = 0x31;
+	s.big[2] = 0x32;
+	s.big[3] = 0x33;
+	s.big[4] = 0x34;
+
+	test4_test1(argB);
+	test4_test2(argA, argB);
+	f(argB);*/
 
 	test3();
-	//test2();
+//	test2();
+	//LONG_JUMP(testRAM)();
+	//LONG_JUMP(testRAM)();
 
 	while(1)
 	{

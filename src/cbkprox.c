@@ -15,8 +15,8 @@
 #endif
 
 #define TABLE_ENTRY1 \
-	"push {r4, r5, lr}\n" \
-	"nop\n" \
+	"push {r0, r1, r2, r3}\n" \
+	"mov r1, lr\n" \
 	"bl .L%=callback_jump_table_end\n"
 
 #define TABLE_ENTRY2 TABLE_ENTRY1 TABLE_ENTRY1
@@ -34,11 +34,7 @@
 #define TABLE_ENTRY8192 TABLE_ENTRY4096 TABLE_ENTRY4096
 
 
-struct
-{
-	uint32_t state[3];
-	void* callbacks[CONFIG_CBKPROX_OUT_SLOTS];
-} out_context;
+void* out_callbacks[CONFIG_CBKPROX_OUT_SLOTS];
 
 
 __attribute__((naked))
@@ -88,61 +84,21 @@ static void callback_jump_table_start(void)
 		TABLE_ENTRY8192
 #endif
 		".L%=callback_jump_table_end:\n"
-		"ldr   r5, .L%=callback_jump_table_start_addr\n"
-		"sub   lr, r5\n"
-		"asrs  lr, lr, #1\n"
-		"ldr   r5, .L%=out_context_addr\n"
-		"mrs   r4, PRIMASK\n"
-		"cpsid i\n"
-		"str   r4, [r5]\n"
-		"str   lr, [r5, #8]\n"
-		"ldr   r4, [sp, #8]\n"
-		"str   r4, [r5, #4]\n"
-		"ldr   lr, [r5, lr]\n"
-		"pop   {r4, r5}\n"
-		"add   sp, #4\n"
-		"push  {lr}\n"
-		"ldr   lr, .L%=handler_return_addr\n"
-		"pop   {pc}\n"
-		".L%=handler_return:"
-		"sub   sp, #4\n"
-		"ldr   r2, .L%=out_context_addr\n"
-		"ldr   r3, [r2, #4]\n"
-		"str   r3, [sp]\n"
-		"ldr   r3, [r2]\n"
- 		"cbnz  r3, .L%=next_instr\n"
- 		"cpsie i\n"
-		".L%=next_instr:\n"
-		"pop   {pc}\n"
+		"mov   r0, lr\n"
+		"mov   lr, r1\n"
+		"ldr   r1, .L%=callback_jump_table_start_addr\n"
+		"sub   r0, r1\n"
+		"asrs  r0, r0, #1\n"
+		"ldr   r1, .L%=out_callbacks_addr\n"
+		"ldr   r1, [r1, r0]\n"
+		"asrs  r0, r0, #2\n"
+		"bx    r1\n"
 		".align 2\n"
-		".L%=handler_return_addr:\n"
-		".word .L%=handler_return + 1\n"
 		".L%=callback_jump_table_start_addr:\n"
-		".word callback_jump_table_start - 16\n"
-		".L%=out_context_addr:\n"
-		".word out_context\n":::
+		".word callback_jump_table_start + 8\n"
+		".L%=out_callbacks_addr:\n"
+		".word out_callbacks\n":::
 		);
-}
-
-
-uint64_t cbkprox_out_start_handler()
-{
-	uint64_t result;
-	result = (uint64_t)((out_context.state[2] - 12) / 4) | ((uint64_t)out_context.state[1] << 32);
-	if (!out_context.state[0]) {
-		__asm volatile("cpsie i\n":::"memory");
-	} else {
-		result |= 0x80000000LL;
-	}
-	return result;
-}
-
-void cbkprox_out_end_handler(uint64_t state)
-{
-	uint64_t key = state & 0x80000000LL;
-	__asm volatile("cpsid i\n"::"r"(key):"memory");
-	out_context.state[0] = key;
-	out_context.state[1] = (uint32_t)(state >> 32);
 }
 
 void* cbkprox_out_get(int index, void *handler)
@@ -152,11 +108,11 @@ void* cbkprox_out_get(int index, void *handler)
 	if (index >= CONFIG_CBKPROX_OUT_SLOTS || index < 0) {
 		return NULL;
 	}
-	else if (out_context.callbacks[index] == NULL)
+	else if (out_callbacks[index] == NULL)
 	{
-		out_context.callbacks[index] = handler;
+		out_callbacks[index] = handler;
 	}
-	else if (out_context.callbacks[index] != handler)
+	else if (out_callbacks[index] != handler)
 	{
 		return NULL;
 	}
@@ -274,3 +230,10 @@ void *cbkprox_in_get(int index, void **callback)
 }
 
 #endif /* CONFIG_CBKPROX_IN_SLOTS > 0 */
+
+
+void test5i(int a, int b, int c, int d, uint64_t x) {
+	__asm__ volatile (
+		"nop\nnop\nnop\nnop\nnop\n"::"r"(a), "r"(b), "r"(c), "r"(d), "r"((uint32_t)x)
+	);
+}

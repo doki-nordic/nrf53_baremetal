@@ -42,23 +42,6 @@
  */
 void *cbkprox_out_get(int index, void *handler);
 
-/** @brief Function called always at the beginning of callback output proxy
- *         handler.
- *
- * @return  State value that have to be passed to cbkprox_out_end_handler()
- *          just before exiting the handler. Lower 16 bits contains slot index
- *          of the callback proxy.
- */
-uint64_t cbkprox_out_start_handler();
-
-/** @brief Function called always just before exiting a callback output proxy
- *         handler.
- *
- * @param state State value obtained at the beginning of the handler with
- *              cbkprox_out_start_handler() function.
- */
-void cbkprox_out_end_handler(uint64_t state);
-
 /** @brief Sets input callback proxy.
  *
  * Calling the function again with the same callback parameter will not
